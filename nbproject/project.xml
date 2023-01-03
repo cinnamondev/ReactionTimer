@@ -3,8 +3,8 @@
     <type>com.microchip.mplab.nbide.embedded.makeproject</type>
     <configuration>
         <data xmlns="http://www.netbeans.org/ns/make-project/1">
-            <name>PICNEA</name>
-            <creation-uuid>0ddad311-00cb-43f7-b9d5-f5860da3ef52</creation-uuid>
+            <name>ReactionTimer</name>
+            <creation-uuid>c32ceff0-38c5-47b0-9ac0-8f621e4cb772</creation-uuid>
             <make-project-type>0</make-project-type>
             <c-extensions/>
             <cpp-extensions/>

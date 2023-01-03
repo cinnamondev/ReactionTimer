@@ -1,9 +1,9 @@
-	LIST P=16F88
-	__CONFIG H'2007', H'3FFA'       ; EXTRCIO, WTDEN disabled, PWRTE disabled,
-	; RA5 is MCLR, BOR enabled, LVP enable, CPD Code prot off,
-	; Write prot off, ICDB disabled, CCP1 on RB0, CP flash prot off.
-	__CONFIG H'2008', H'3FFC'       ; Clock Fail-Safe disabled, 
-	; int.ext switchover disabled.
+LIST P=16F88
+__CONFIG H'2007', H'3FFA'       ; EXTRCIO, WTDEN disabled, PWRTE disabled,
+; RA5 is MCLR, BOR enabled, LVP enable, CPD Code prot off,
+; Write prot off, ICDB disabled, CCP1 on RB0, CP flash prot off.
+__CONFIG H'2008', H'3FFC'       ; Clock Fail-Safe disabled, 
+; int.ext switchover disabled.
 
 ;::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: 
 

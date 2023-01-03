@@ -505,21 +505,12 @@
                   value=""/>
         <property key="warningmessagebreakoptions.warningmessages" value="holdstate"/>
       </Simulator>
-      <item path="main.asm" ex="false" overriding="false">
-        <MPASMWIN-AS>
-        </MPASMWIN-AS>
-        <MPASMWIN-LD>
-        </MPASMWIN-LD>
-        <mpasmsuite>
-        </mpasmsuite>
-      </item>
       <mpasmsuite>
-        <property key="absolute-mode" value="true"/>
+        <property key="absolute-mode" value="false"/>
         <property key="eeprom-width" value="8"/>
         <property key="extended-mode" value="false"/>
         <property key="extended-mode-mpasm" value="false"/>
         <property key="extended-mode-mplink" value="false"/>
-        <appendMe value="/a INHX32 /q /d PIC%chip% /w 0 "/>
       </mpasmsuite>
     </conf>
   </confs>
