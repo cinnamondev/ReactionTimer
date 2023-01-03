@@ -1,0 +1,9 @@
+*.~cw
+build/
+dist/
+nbproject/Makefile-*
+nbproject/Package-*
+nbproject/private
+.generated_files/
+debug/
+*.docx
