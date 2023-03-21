@@ -1,39 +1,19 @@
 ;; Cinnamondev. Reaction timer game for the PIC16F88.
 ;; Made for my A-Level coursework.
 
-#include <p16f88.inc>
 
     LIST P=16F88
 
     __CONFIG H'2007', H'3FFA'       ; EXTRCIO, WTDEN disabled, PWRTE disabled,
 ; RA5 is MCLR, BOR enabled, LVP enable, CPD Code prot off,
 ; Write prot off, ICDB disabled, CCP1 on RB0, CP flash prot off.
-    __CONFIG H'2008', H'3FFC'       ; Clock Fail-Safe disabled, 
-; int.ext switchover disabled.
+#include <p16f88.inc>
 
-;::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: 
-
-				
-#DEFINE	PAGE0	BCF 	STATUS,5	
-#DEFINE	PAGE1	BSF 	STATUS,5	
-;::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
-
-;       VECTORS
-
-	ORG	00		; Reset vector
-	GOTO	BNK 		; Goto start of program 
-	ORG	04		; Interrupt vector address
-		
-;::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
-;       File labels
 	
-udata 0x20
-	C1,
-	C2,
-	C3,
-	C4,
-	C5,
-	C6
+;::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+;       stuff
+
+	
 	
 CCODE	EQU	H'3A'			;; CCODE (Current Code) register - holds current code on inputs
 A	EQU	H'20'			;; A register - is used like a boolean and determines win or loss
@@ -41,45 +21,53 @@ A	EQU	H'20'			;; A register - is used like a boolean and determines win or loss
 
 CN	EQU	H'2A'	; Starting position
 
-    ucode 0x2A		;;  C1-6 are all "digit" registers.  0x2A - 2F
-	C1,
-	C2,
-	C3,
-	C4,
-	C5,
-	C6
-    endc
-
 
 DLY	EQU	H'2E'			;; Delay register for win / lose
 S1	EQU	H'3D'			;; Sequence side 1 for win
 	
 LOWc	EQU	H'3E'			;; register that defines when the code was too low (will update on each incorrect code, if 0 we will consider it high.)
+	EXTERN	OUTCODE,SCAN
+	udata
+C
+C1
+C2
+C3
+C4
+C5
+C6	
 ;::::::::::::::::::::::::::::::::::::::::::::::::::::::::: ::::::::::: 
 
-;       THIS SECTION IS USED TO SET THE DIRECTION OF THE OUTPUT PORTS. 
+;       VECTORS
 
-BNK BSF	STATUS,5		;;Bank 1 operation 
-    CLRF	H'1B'			;;Makes the ANSEL (analogue) inputs digital 
-    MOVLW	B'00011111'		;;
-    MOVWF	TRISA			;;   Set PORTA to all inputs. 
-    MOVLW	B'00000000'		;; 
-    MOVWF	TRISB			;;   Set PORTB to all outputs. 
-    BCF	STATUS,5			;;Back to bank 0 
+.START	CODE	00		; Reset vector
+	GOTO	START		; Goto start of program 
+
+	
+;       THIS SECTION IS USED TO SET THE DIRECTION OF THE OUTPUT PORTS. 
+	CODE
+START	BSF	STATUS,5		;;Bank 1 operation 
+	CLRF	H'9B'			;;Makes the ANSEL (analogue) inputs digital 
+	MOVLW	B'00011111'		;;
+	MOVWF	TRISA			;;   Set PORTA to all inputs. 
+	MOVLW	B'00000000'		;; 
+	MOVWF	TRISB			;;   Set PORTB to all outputs. 
+	BCF	STATUS,5			;;Back to bank 0 
 
 ;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: 
 ;	MAIN PROGRAM 
- 
-start	CLRF	PORTB			;; Ensure PORTB is clear.
-	MOVLW	0			;; empty working register
-	MOVWF	A			;; move empty working register into files
-	MOVWF	CCODE			;; /\
-	MOVWF	LOWc			;; /\
+MAIN	CLRF	PORTB
+	CALL	SCAN
 	
-	CALL	RCODE0			;; Reaction code input method.
+	;; Ensure PORTB is clear.
+	;;MOVLW	0			;; empty working register
+	;;MOVWF	A			;; move empty working register into files
+	;;MOVWF	CCODE			;; /\
+	;;MOVWF	LOWc			;; /\
+	
+	;CALL	RCODE0			;; Reaction code input method.
 	;;CALL	TCODE			;; test function - uncomment if needed (but comment out RCODE0!)
-	CALL	CODE0			;; Code checking method (based on code inputted in RCODE0)
-	GOTO	start			;; Loop at end! (if code is created and correctly guessed we will reset all crucial values)
+	;;CALL	CODE0			;; Code checking method (based on code inputted in RCODE0)
+	GOTO	MAIN 		;; Loop at end! (if code is created and correctly guessed we will reset all crucial values)
 
 ;	write your program here. 	 
 
@@ -204,7 +192,7 @@ WINL	MOVF	S1,W			;; S1 -> Working reg
 	DECFSZ	D			;; Decreases value in delay register until it = 0
 	GOTO	WINL			;; Loop until delay register has been emptied
 	CLRF	PORTB			;; clear portb once loop finished
-	GOTO	start			;; Once loop has ended, go to the start of the program.
+	GOTO	MAIN			;; Once loop has ended, go to the start of the program.
 	RETURN
 
 	;; Resets S1 register to initial position
@@ -254,8 +242,8 @@ CODE0	CLRF	PORTB			;; Clear PORTB as a precaution
 	
 	MOVF	C1,W			;; C1-->WORKING REGISTER
 	SUBWF	CCODE,W			;; CCODE-C1 --> WORKING REGISTER
-	;; IF C1 >= CCODE CCODE IS TOO LOW
-	BTFSC	STATUS,C		;; skip low indicator if not >=
+	;; IF C1 >= CCOD CCODE IS TOO LOW
+	BTFSC	STATUS,0		;; skip low indicator if not >=
 	GOTO	LSK0
 	MOVLW	B'1'			;; Indicate too low!
 	MOVWF	LOWc
@@ -272,7 +260,7 @@ CODE1	CALL	R0C0			;; Get a keypad input --> CCODE
 	MOVF	C5,W			;; C2-->WORKING REGISTER
 	SUBWF	CCODE,W			;; CCODE-C2 --> WORKING REGISTER
 	;; IF C2 >= CCODE CCODE IS TOO LOW
-	BTFSC	STATUS,C		;; skip low indicator if not >=
+	BTFSC	STATUS,0		;; skip low indicator if not >=
 	GOTO	LSK1
 	MOVLW	B'1'			;; Indicate too low!
 	MOVWF	LOWc			;; move indicator into LOW register
@@ -290,7 +278,7 @@ CODE2	CALL	R0C0			;; Get a keypad input --> CCODE
 	MOVF	C3,W			;; C3-->WORKING REGISTER
 	SUBWF	CCODE,W			;; CCODE-C3 --> WORKING REGISTER
 	;; IF C3 >= CCODE CCODE IS TOO LOW
-	BTFSC	STATUS,C		;; skip low indicator if not >=
+	BTFSC	STATUS,0		;; skip low indicator if not >=
 	GOTO	LSK2
 	MOVLW	B'1'			;; Indicate too low!
 	MOVWF	LOWc			;; move indicator into LOW register
@@ -307,7 +295,7 @@ CODE3	CALL	R0C0			;; Get a keypad input --> CCODE
 	MOVF	C4,W			;; C4-->WORKING REGISTER
 	SUBWF	CCODE,W			;; CCODE-C4 --> WORKING REGISTER
 	;; IF C4 >= CCODE CCODE IS TOO LOW
-	BTFSC	STATUS,C		;; skip low indicator if not >=
+	BTFSC	STATUS,0		;; skip low indicator if not >=
 	GOTO	LSK3
 	MOVLW	B'1'			;; Indicate too low!
 	MOVWF	LOWc			;; move indicator into LOW register
@@ -315,7 +303,7 @@ CODE3	CALL	R0C0			;; Get a keypad input --> CCODE
 LSK3	MOVLW	B'1'			;; Indicate incorrect code.
 	MOVWF	A			;; Move 1 from W into A register, indicating code was guessed wrong. (used in CGEND)
 
-CODE4	CALL	R0C0			;; Get a keypad input --> CCODE
+CODE4	CALL	R0C0		;; Get a keypad input --> CCODE
 	MOVF	CCODE,W			;; Move CCODE (Keypad input) -> W 
 	SUBWF	C5,W			;; Check if CCODE is equal to the programmed in code. (C5-W(CCODE) --> W)
 	BTFSC	STATUS,Z		;; If CCODE=C5 STATUS,Z should be 1! (Z is zero status bit) (Thus if code is correct do not skip)
@@ -324,7 +312,7 @@ CODE4	CALL	R0C0			;; Get a keypad input --> CCODE
 	MOVF	C5,W			;; C5-->WORKING REGISTER
 	SUBWF	CCODE,W			;; CCODE-C5 --> WORKING REGISTER
 	;; IF C5 >= CCODE CCODE IS TOO LOW
-	BTFSC	STATUS,C		;; skip low indicator if not >=
+	BTFSC	STATUS,0		;; skip low indicator if not >=
 	GOTO	LSK4
 	MOVLW	B'1'			;; Indicate too low!
 	MOVWF	LOWc			;; move indicator into LOW register
@@ -341,7 +329,7 @@ CODE5	CALL	R0C0			;; Get a keypad input --> CCODE
 	MOVF	C6,W			;; C6-->WORKING REGISTER
 	SUBWF	CCODE,W			;; CCODE-C5 --> WORKING REGISTER
 	;; IF C6  >= CCODE CCODE IS TOO LOW
-	BTFSC	STATUS,C		;; skip low indicator if not >=
+	BTFSC	STATUS,0		;; skip low indicator if not >=
 	GOTO	LSK5
 	MOVLW	B'1'			;; Indicate too low!
 	MOVWF	LOWc			;; move indicator into LOW register
