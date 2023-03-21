@@ -1,8 +1,14 @@
-LIST P=16F88
-__CONFIG H'2007', H'3FFA'       ; EXTRCIO, WTDEN disabled, PWRTE disabled,
+;; Cinnamondev. Reaction timer game for the PIC16F88.
+;; Made for my A-Level coursework.
+
+#include <p16f88.inc>
+
+    LIST P=16F88
+
+    __CONFIG H'2007', H'3FFA'       ; EXTRCIO, WTDEN disabled, PWRTE disabled,
 ; RA5 is MCLR, BOR enabled, LVP enable, CPD Code prot off,
 ; Write prot off, ICDB disabled, CCP1 on RB0, CP flash prot off.
-__CONFIG H'2008', H'3FFC'       ; Clock Fail-Safe disabled, 
+    __CONFIG H'2008', H'3FFC'       ; Clock Fail-Safe disabled, 
 ; int.ext switchover disabled.
 
 ;::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: 
@@ -10,48 +16,42 @@ __CONFIG H'2008', H'3FFC'       ; Clock Fail-Safe disabled,
 				
 #DEFINE	PAGE0	BCF 	STATUS,5	
 #DEFINE	PAGE1	BSF 	STATUS,5	
-
-	; define SFRs
-	
-OPSHUN	EQU	H'81'		;
-STATUS	EQU	H'03'		;defines status register
-TRISA	EQU	H'5'		;defines trisA register
-PORTA	EQU	H'05'		;defines portA register
-TRISB	EQU	H'6'		;defines TrisB register
-PORTB	EQU	H'06'		;defines portB register
-PCL	EQU	H'02'		;Names the register called program counter
-W	EQU	0		;Sets up the name used for the working register
-F	EQU	1		;Sets up the name used for file
-Z	EQU	2		;Sets up the name used for the zero flag
-C      	EQU 	0          	;Sets up the name used for the carry flag
-
 ;::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 ;       VECTORS
 
 	ORG	00		; Reset vector
-	GOTO	XYZ		; Goto start of program 
+	GOTO	BNK 		; Goto start of program 
 	ORG	04		; Interrupt vector address
-	GOTO	05		; Goto start of program
-	ORG	05		; Start of program memory
 		
 ;::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
-;       NAME YOUR REGISTERS HERE 
-
-;; All our code registers.
-CCODE	EQU	H'2F'			;; CCODE (Current Code) register - holds current code on inputs
+;       File labels
+	
+udata 0x20
+	C1,
+	C2,
+	C3,
+	C4,
+	C5,
+	C6
+	
+CCODE	EQU	H'3A'			;; CCODE (Current Code) register - holds current code on inputs
 A	EQU	H'20'			;; A register - is used like a boolean and determines win or loss
 					;; If A=1 lose -  A=0 win
 
-C1	EQU	H'2A'			;; C1-6 are all code digit registers.
-C2	EQU	H'2B'			;; We will handle each digit as a value to guess 
-C3	EQU	H'2C'			;; independently but then compare when you lose as a whole.
-C4	EQU	H'2D'
-C5	EQU	H'2E'
-C6	EQU	H'3A'
+CN	EQU	H'2A'	; Starting position
+
+    ucode 0x2A		;;  C1-6 are all "digit" registers.  0x2A - 2F
+	C1,
+	C2,
+	C3,
+	C4,
+	C5,
+	C6
+    endc
 
 
-D	EQU	H'2E'			;; Delay register for win / lose
+DLY	EQU	H'2E'			;; Delay register for win / lose
 S1	EQU	H'3D'			;; Sequence side 1 for win
 	
 LOWc	EQU	H'3E'			;; register that defines when the code was too low (will update on each incorrect code, if 0 we will consider it high.)
@@ -59,7 +59,7 @@ LOWc	EQU	H'3E'			;; register that defines when the code was too low (will update
 
 ;       THIS SECTION IS USED TO SET THE DIRECTION OF THE OUTPUT PORTS. 
 
-XYZ	BSF	STATUS,5		;;Bank 1 operation 
+BNK BSF	STATUS,5		;;Bank 1 operation 
     CLRF	H'1B'			;;Makes the ANSEL (analogue) inputs digital 
     MOVLW	B'00011111'		;;
     MOVWF	TRISA			;;   Set PORTA to all inputs. 
@@ -70,7 +70,7 @@ XYZ	BSF	STATUS,5		;;Bank 1 operation
 ;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: 
 ;	MAIN PROGRAM 
  
-start	CLRF	PORTB			;; clear PORTB - precaution
+start	CLRF	PORTB			;; Ensure PORTB is clear.
 	MOVLW	0			;; empty working register
 	MOVWF	A			;; move empty working register into files
 	MOVWF	CCODE			;; /\
@@ -103,7 +103,7 @@ start	CLRF	PORTB			;; clear PORTB - precaution
 	
 ;	SUBROUTINES 
 ; Any subroutines to go in this section.  
-
+	
 ;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::;; 
 ;;	REACTION INPUT						;;
 ;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::;; 
