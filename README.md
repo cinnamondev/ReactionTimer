@@ -1,7 +1,9 @@
-# PICNEA
+# PICNEA / ReactionTimer
 Y12 Electronics coursework for PIC16F88
 
+## V2
 
+Original macro version seems to have been lost, so a rewrite that does the keypad snazz in less lines! Currently untested fully... but its there :) and VERY much so improves on dead and bad code. 
 
 
 
