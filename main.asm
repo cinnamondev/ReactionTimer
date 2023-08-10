@@ -1,443 +1,342 @@
-LIST P=16F88
-__CONFIG H'2007', H'3FFA'       ; EXTRCIO, WTDEN disabled, PWRTE disabled,
-; RA5 is MCLR, BOR enabled, LVP enable, CPD Code prot off,
-; Write prot off, ICDB disabled, CCP1 on RB0, CP flash prot off.
-__CONFIG H'2008', H'3FFC'       ; Clock Fail-Safe disabled, 
-; int.ext switchover disabled.
+;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+;; ReactionTimer V2
+;;	Couldn't find the original macro version, so it has been remade with
+;;    many improvements! Licensed under Apache 2.0.
+;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+
+    ; Program basis:
+    ; User has keypad as input mechanism
+    ; User has to guess what the code is in various game modes
+    ; GAMEMODE_TEST (not normal): Known code input
+    ; GAMEMODE_REACTION: User has to produce an unknown code indirectly 
+
+    
+					
+    LIST P=16F88
+#include <p16f88.inc>
+    __CONFIG _CONFIG1, _EXTRC_IO & _WDT_OFF & _PWRTE_OFF & _MCLR_ON & _LVP_ON & _BOREN_ON & _CPD_OFF
+    __CONFIG _CONFIG2, _FCMEN_OFF & _IESO_OFF
 
 ;::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: 
 
-				
-#DEFINE	PAGE0	BCF 	STATUS,5	
-#DEFINE	PAGE1	BSF 	STATUS,5	
-
-	; define SFRs
-	
-OPSHUN	EQU	H'81'		;
-STATUS	EQU	H'03'		;defines status register
-TRISA	EQU	H'5'		;defines trisA register
-PORTA	EQU	H'05'		;defines portA register
-TRISB	EQU	H'6'		;defines TrisB register
-PORTB	EQU	H'06'		;defines portB register
-PCL	EQU	H'02'		;Names the register called program counter
-W	EQU	0		;Sets up the name used for the working register
-F	EQU	1		;Sets up the name used for file
-Z	EQU	2		;Sets up the name used for the zero flag
-C      	EQU 	0          	;Sets up the name used for the carry flag
-
-;::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
-
-;       VECTORS
-
-	ORG	00		; Reset vector
-	GOTO	XYZ		; Goto start of program 
-	ORG	04		; Interrupt vector address
-	GOTO	05		; Goto start of program
-	ORG	05		; Start of program memory
-		
-;::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
-;       NAME YOUR REGISTERS HERE 
-
-;; All our code registers.
-CCODE	EQU	H'2F'			;; CCODE (Current Code) register - holds current code on inputs
-A	EQU	H'20'			;; A register - is used like a boolean and determines win or loss
-					;; If A=1 lose -  A=0 win
-
-C1	EQU	H'2A'			;; C1-6 are all code digit registers.
-C2	EQU	H'2B'			;; We will handle each digit as a value to guess 
-C3	EQU	H'2C'			;; independently but then compare when you lose as a whole.
-C4	EQU	H'2D'
-C5	EQU	H'2E'
-C6	EQU	H'3A'
-
-
-D	EQU	H'2E'			;; Delay register for win / lose
-S1	EQU	H'3D'			;; Sequence side 1 for win
-	
-LOWc	EQU	H'3E'			;; register that defines when the code was too low (will update on each incorrect code, if 0 we will consider it high.)
-;::::::::::::::::::::::::::::::::::::::::::::::::::::::::: ::::::::::: 
-
-;       THIS SECTION IS USED TO SET THE DIRECTION OF THE OUTPUT PORTS. 
-
-XYZ	BSF	STATUS,5		;;Bank 1 operation 
-    CLRF	H'1B'			;;Makes the ANSEL (analogue) inputs digital 
-    MOVLW	B'00011111'		;;
-    MOVWF	TRISA			;;   Set PORTA to all inputs. 
-    MOVLW	B'00000000'		;; 
-    MOVWF	TRISB			;;   Set PORTB to all outputs. 
-    BCF	STATUS,5			;;Back to bank 0 
-
-;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: 
-;	MAIN PROGRAM 
- 
-start	CLRF	PORTB			;; clear PORTB - precaution
-	MOVLW	0			;; empty working register
-	MOVWF	A			;; move empty working register into files
-	MOVWF	CCODE			;; /\
-	MOVWF	LOWc			;; /\
-	
-	CALL	RCODE0			;; Reaction code input method.
-	;;CALL	TCODE			;; test function - uncomment if needed (but comment out RCODE0!)
-	CALL	CODE0			;; Code checking method (based on code inputted in RCODE0)
-	GOTO	start			;; Loop at end! (if code is created and correctly guessed we will reset all crucial values)
-
-;	write your program here. 	 
-
-;;	Pin usage 
-;; 
-;;	PORTB7		unlock/lock 'puzzle' (delay thing for win/lose) 
-;;	PORTB0:2	keypad matrix outputs (for rows) 
-;;	PORTB3:6	scroll left (keypad will not be affected due to it not being actively scanned)
-;;	PORTB4		indicate too low
-;;	PORTB5		indicate too high
-;;	PORTB6		indicate 'ready'
-;;	PORTA0:3	keypad matrix inputs (for columns)  
-
-;;	Primary/entry functions
-;;	    RCODE0  - Reaction/random code input subroutine. Programs in C1:6
-;;	    RCODE   - The subroutine for each RCODE* that allows values from 1-9 to come out, with it looping when called until PORTA,3 is pressed & released.
-;;			^ (Value is returned in CCODE)
-;;	    CODE0   - Code guesser entry subroutine. Gets input from keypad
-;;	    R0C0    - Entry subroutine for the keypad scanner. Results are stored in CCODE
-;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: 
-	
-;	SUBROUTINES 
-; Any subroutines to go in this section.  
-
-;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::;; 
-;;	REACTION INPUT						;;
-;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::;; 
-	
-;; RCODE subroutine - loops CCODE from 11 to 2 (if it hits 1 it resets).
-;; If CLR button on keypad matrix is pressed, the loop ends and whatever value is there (minus one)
-;; is kept in CCODE (to be moved into the relevant C* slot by the caller.)
-	;; Set CCODE to limit
-RCODE	MOVLW	d'11'			;; Set working register to 11
-	MOVWF	CCODE			;; Set CCODE to working register (we are setting CCODE to 11 here so its 2 above the limit so at all times its 1-9 by the end)
-	
-	BSF	PORTB,1			;; Turn on second row of the keypad. Will allow for pressing of CLR in the keyboard matrix.
-B3OFF	BTFSC	PORTA,3			;; Loop if portA3 is on (clr button) (forces release after each input)		;;error 2 mixed up (SC SS)
-	GOTO	B3OFF			;; Loop until portA3 is off
-
-RLOOP	DECF	CCODE			;; CCODE-1 (Prevents values out of range for input being sent to registers & decreases until hits lower limit)
-	MOVLW	1			;; 1 --> WREG (Change this value to change the floor of the code checker)
-	SUBWF	CCODE,W			;; CCODE-W --> W, If result = 0 the values must be equal (1=1), therefore CCODE needs reset. 
-	BTFSC	STATUS,Z		;; Z should be 1 when the result of the line above is 0 (Z is zero bit)
-	GOTO	CCRST			;; Reset the CCODE register to the limit+2 for possible codes
-	BTFSS	PORTA,3			;; Check if portA3 is released, enter a loop until it  is pressed.		;; error 2 mixed up (SC SS)
-	GOTO	RLOOP			;; Loop until portA3 is pressed.
-	BCF	PORTB,1			;; We can turn off the row for the CLR button in the keypad as we are done with it
-	DECF	CCODE			;; Take 1 from the final value (this prevents the program from ever being in a value such as 11 or something)
-	MOVF	CCODE,W			;; Move copy of CCODE into WREG
-	RETURN		
-	
-CCRST	MOVLW	d'11'			;; move limit for ccode into working register
-	MOVWF	CCODE			;; move working register (d'11') into CCODE/set to limit
-	GOTO	RLOOP			;; go to the start of the loop (causing it to lose 1 value so its always "11>CCODE>1"
- 
-;; Reaction code inputs - add codes to all respective code digit slots.
-RCODE0	CALL	RCODE			;; Call RCODE function - use value in CCODE register after
-	MOVF	CCODE,W			;; move ccode into working register
-	MOVWF	C1			;; Move CCODE (W) value into C1, program in new code digit.
-	
-RCODE1	CALL	RCODE			;; Call RCODE function - use value in CCODE register after
-	MOVF	CCODE,W			;; move ccode into working register
-	MOVWF	C2			;; Move CCODE (W) value into C2, program in new code digit.
-	
-RCODE2	CALL	RCODE			;; Call RCODE function - use value in CCODE register after
-	MOVF	CCODE,W			;; move ccode into working register
-	MOVWF	C3			;; Move CCODE (W) value into C3, program in new code digit.
-	
-RCODE3	CALL	RCODE			;; Call RCODE function - use value in CCODE register after
-	MOVF	CCODE,W			;; move ccode into working register
-	MOVWF	C4			;; Move CCODE (W) value into C4, program in new code digit. 
-	
-RCODE4	CALL	RCODE			;; Call RCODE function - use value in CCODE register after
-	MOVF	CCODE,W			;; move ccode into working register
-	MOVWF	C5			;; Move CCODE (W) value into C5, program in new code digit.
-	
-RCODE5	CALL	RCODE			;; Call RCODE function - use value in CCODE register after
-	MOVF	CCODE,W			;; move ccode into working register
-	MOVWF	C6			;; Move CCODE (W) value into C6, program in new code digit.	
-	RETURN				;; end of all reaction code inputs - return so we can continue.
-
-;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::;; 
-;;	TESTS							;; 
-;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::;; 
-	
-; Test code function.. works well for testing the functionality of the code guesser
-TCODE	MOVLW	d'8' ;; Test subroutine for code guesser. Sets all codes to 1.
-	MOVWF	C1   ;; To use comment out CALL RCODE0 and call this one below
-	MOVWF	C2
-	MOVWF	C3
-	MOVWF	C4
-	MOVWF	C5
-	MOVWF	C6
-	RETURN
-	
-;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::;; 
-;;	WIN/LOSE SCENARIOS	;; 
-;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::;; 
-
- 
-;; CCWIN FUNCTION - when you win the code guesser the program will jump here.
-;; CCWIN will turn on PORTB7 for a period of time (where in a puzzle box it would trigger a solenoid or similar),
-;; and play a 'scrolling right' animation.
-	
-	;; Fill delay register to max.
-CCWIN	MOVLW	b'10000000'		;; Set W to 128
-	MOVWF	D			;; Set delay register to max
-	;; Sets S1 register to it's initial value.
-	MOVLW	b'00001000'		;; Set to center position
-	MOVWF	S1			;; Set S1 to starting point
-	
-	;; Animates S1 with bit shift lefts until it reaches B7 
-WINL	MOVF	S1,W			;; S1 -> Working reg
-	ADDWF	S1			;; S1+W(S1)->S1 (Shifts bits 1 left) (NOTE: bits are flipped flipped in reality so it actually goes right)
-	BTFSC	S1,7			;; Check if S1 has reached PORTB7
-	CALL	S1R			;; Reset S1 to it's initial position
-	
-	MOVF	S1,W			;; Move S1 into working register
-	IORLW	B'10000000'		;; '10000000' + W (S1), Ensures PORTB7 is on.
-	MOVWF	PORTB			;; Applies current 'frame' of animation to PORTB
-	
-	DECFSZ	D			;; Decreases value in delay register until it = 0
-	GOTO	WINL			;; Loop until delay register has been emptied
-	CLRF	PORTB			;; clear portb once loop finished
-	GOTO	start			;; Once loop has ended, go to the start of the program.
-	RETURN
-
-	;; Resets S1 register to initial position
-S1R	MOVLW	b'00001000'		;; Move center starting point for S1 
-	MOVWF	S1			;; Set S1 to starting point
-	RETURN
-	
- 
-;; CCLOSE FUNCTION - when you lose the code guesser game you go here.
-;; Performs the calculation for if you were too low or too high and indicates
-;; on PORTB4 and 5 respectively. Loops a delay afterwards then after delay
-;; returns to the start of the code guesser (to allow you to try again)
-	
-;; Potential easy implementation would be 'lives' but time. (ie you have 3 lives
-;; and if it reaches 0 after the delay the program enters a trap/inf loop)
-	
-;; If you lose it will calculate whether you were too high or too low in your guess. PORTB4 = too low! PORTB5 = high!
-CCLOSE	CLRF	PORTB			;; cleanup
-	MOVLW	b'10000000'		;; Set W to 128
-	MOVWF	D			;; Set delay register to max
-	BTFSS	LOWc,0			;; check if LOW is on or off
-	GOTO	HIGHL
-	BSF	PORTB,4			;; Indicate code guess was too low
-	GOTO	LOSEL			;; loop at this point so we dont get high
-HIGHL	BSF	PORTB,5			;; Indicate code guess was too high
-LOSEL	DECFSZ	D			;; Delay loop - decrement D (Delay) register until equals 0
-	GOTO	LOSEL			;; Go to start of loop
-	CLRF	PORTB
-	GOTO	CODE0			;; When loop ends - go to the start of the codechecker function so you can try again.
-	RETURN
-	
-;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::;; 
-;;	CODE CHECKER						;;  
-;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::;; 
-
-;; Code0 is our entry point for the code checker.
-;; Goes through C0-5 (where the relevant registers are C1-6) and gets input
-CODE0	CLRF	PORTB			;; Clear PORTB as a precaution
-	CLRF	A			;; clear losing register
-	CLRF	LOWc			;; clear low indicator register
-	
-	CALL	R0C0			;; Get a keypad input --> CCODE
-	MOVF	CCODE,W			;; Move CCODE (Keypad input) -> W 
-	SUBWF	C1,W			;; Check if CCODE is equal to the programmed in code. (C1-W(CCODE) --> W)
-	BTFSC	STATUS,Z		;; If CCODE=C1 STATUS,Z should be 1! (Z is zero status bit) (Thus if code is correct do not skip)
-	GOTO	CODE1			;; Go to the next code check
-	
-	MOVF	C1,W			;; C1-->WORKING REGISTER
-	SUBWF	CCODE,W			;; CCODE-C1 --> WORKING REGISTER
-	;; IF C1 >= CCODE CCODE IS TOO LOW
-	BTFSC	STATUS,C		;; skip low indicator if not >=
-	GOTO	LSK0
-	MOVLW	B'1'			;; Indicate too low!
-	MOVWF	LOWc
-	
-LSK0	MOVLW	B'1'			;; Indicate incorrect code.
-	MOVWF	A			;; Move 1 from W into A register, indicating code was guessed wrong. (used in CGEND)
-
-CODE1	CALL	R0C0			;; Get a keypad input --> CCODE
-	MOVF	CCODE,W			;; Move CCODE (Keypad input) -> W 
-	SUBWF	C2,W			;; Check if CCODE is equal to the programmed in code. (C2-W(CCODE) --> W)
-	BTFSC	STATUS,Z		;; If CCODE=C2 STATUS,Z should be 1! (Z is zero status bit) (Thus if code is correct do not skip)
-	GOTO	CODE2			;; Go to the next code check
-	
-	MOVF	C5,W			;; C2-->WORKING REGISTER
-	SUBWF	CCODE,W			;; CCODE-C2 --> WORKING REGISTER
-	;; IF C2 >= CCODE CCODE IS TOO LOW
-	BTFSC	STATUS,C		;; skip low indicator if not >=
-	GOTO	LSK1
-	MOVLW	B'1'			;; Indicate too low!
-	MOVWF	LOWc			;; move indicator into LOW register
-	
-LSK1	MOVLW	B'1'			;; Indicate incorrect code.
-	MOVWF	A			;; Move 1 from W into A register, indicating code was guessed wrong. (used in CGEND)
-
-CODE2	CALL	R0C0			;; Get a keypad input --> CCODE
-	MOVF	CCODE,W			;; Move CCODE (Keypad input) -> W 
-	SUBWF	C3,W			;; Check if CCODE is equal to the programmed in code. (C3-W(CCODE) --> W)
-	BTFSC	STATUS,Z		;; If CCODE=C3 STATUS,Z should be 1! (Z is zero status bit) (Thus if code is correct do not skip)
-	GOTO	CODE3			;; Go to the next code check
-	
-	
-	MOVF	C3,W			;; C3-->WORKING REGISTER
-	SUBWF	CCODE,W			;; CCODE-C3 --> WORKING REGISTER
-	;; IF C3 >= CCODE CCODE IS TOO LOW
-	BTFSC	STATUS,C		;; skip low indicator if not >=
-	GOTO	LSK2
-	MOVLW	B'1'			;; Indicate too low!
-	MOVWF	LOWc			;; move indicator into LOW register
-	
-LSK2	MOVLW	B'1'			;; Indicate incorrect code.
-	MOVWF	A			;; Move 1 from W into A register, indicating code was guessed wrong. (used in CGEND)
-
-CODE3	CALL	R0C0			;; Get a keypad input --> CCODE
-	MOVF	CCODE,W			;; Move CCODE (Keypad input) -> W 
-	SUBWF	C4,W			;; Check if CCODE is equal to the programmed in code. (C4-W(CCODE) --> W)
-	BTFSC	STATUS,Z		;; If CCODE=C4 STATUS,Z should be 1! (Z is zero status bit) (Thus if code is correct do not skip)
-	GOTO	CODE4			;; Go to the next code check
-	
-	MOVF	C4,W			;; C4-->WORKING REGISTER
-	SUBWF	CCODE,W			;; CCODE-C4 --> WORKING REGISTER
-	;; IF C4 >= CCODE CCODE IS TOO LOW
-	BTFSC	STATUS,C		;; skip low indicator if not >=
-	GOTO	LSK3
-	MOVLW	B'1'			;; Indicate too low!
-	MOVWF	LOWc			;; move indicator into LOW register
-	
-LSK3	MOVLW	B'1'			;; Indicate incorrect code.
-	MOVWF	A			;; Move 1 from W into A register, indicating code was guessed wrong. (used in CGEND)
-
-CODE4	CALL	R0C0			;; Get a keypad input --> CCODE
-	MOVF	CCODE,W			;; Move CCODE (Keypad input) -> W 
-	SUBWF	C5,W			;; Check if CCODE is equal to the programmed in code. (C5-W(CCODE) --> W)
-	BTFSC	STATUS,Z		;; If CCODE=C5 STATUS,Z should be 1! (Z is zero status bit) (Thus if code is correct do not skip)
-	GOTO	CODE5			;; Go to the next code check
-	
-	MOVF	C5,W			;; C5-->WORKING REGISTER
-	SUBWF	CCODE,W			;; CCODE-C5 --> WORKING REGISTER
-	;; IF C5 >= CCODE CCODE IS TOO LOW
-	BTFSC	STATUS,C		;; skip low indicator if not >=
-	GOTO	LSK4
-	MOVLW	B'1'			;; Indicate too low!
-	MOVWF	LOWc			;; move indicator into LOW register
-	
-LSK4	MOVLW	B'1'			;; Indicate incorrect code.
-	MOVWF	A			;; Move 1 from W into A register, indicating code was guessed wrong. (used in CGEND)
-
-CODE5	CALL	R0C0			;; Get a keypad input --> CCODE
-	MOVF	CCODE,W ;; Move CCODE (Keypad input) -> W 
-	SUBWF	C6,W			;; Check if CCODE is equal to the programmed in code. (C6-W(CCODE) --> W)
-	BTFSC	STATUS,Z		;; If CCODE=C1 STATUS,Z should be 1! (Z is zero status bit) (Thus if code is correct do not skip)
-	GOTO	CGEND			;; Go to the end of the program.
-	
-	MOVF	C6,W			;; C6-->WORKING REGISTER
-	SUBWF	CCODE,W			;; CCODE-C5 --> WORKING REGISTER
-	;; IF C6  >= CCODE CCODE IS TOO LOW
-	BTFSC	STATUS,C		;; skip low indicator if not >=
-	GOTO	LSK5
-	MOVLW	B'1'			;; Indicate too low!
-	MOVWF	LOWc			;; move indicator into LOW register
-LSK5	MOVLW	B'1'			;; Move 1 into working register
-	MOVWF	A			;; Move 1 from W into A register, indicating code was guessed wrong. (used in CGEND)
-CGEND	;; You end up here once all the codes are inputted.
-	BTFSC	A,0			;; Check the value of the A register - determines if we win (if A0 is 1 we lose)
-	GOTO	CCLOSE			;; Lose scenario - skipped if A0 is clear.
-	GOTO	CCWIN			;; Win scenario
-
-	RETURN 
-
-;; R0C0 is the entry subroutine for the keypad input subroutine.
-;; Loops through turning on each row and checking each column and returning the relevant value for it.
-;; When an input is found, it will trap it in a loop until it is released then return to the caller.
-R0C0	CLRF	PORTB			;; Clear portB as a precaution
-	BSF	PORTB,6			;; Tell user ready for input!
-	
-	BSF	PORTB,0			;; Turns on output for row 0 scanning
-	BTFSS	PORTA,0			;; check if Row 0 Column 0 is high (keypad 1) 
-	GOTO	R0C1			;; if button is not pressed go to the next one.
-	MOVLW	d'1'			;; Moves the value of keypad into the working register
-	MOVWF	CCODE			;; Moves the content of the working register into the file.
-	GOTO	SCANE			;; since the button was pressed, we do not need to do any more scanning.
-
-R0C1	BTFSS	PORTA,1			;; check if Row 0 Column 1 is high (keypad 2) 
-	GOTO	R0C2			;; if button is not pressed go to the next one.
-	MOVLW	d'2'			;; Moves the value of keypad into the working register
-	MOVWF	CCODE			;; Moves the content of the working register into the file.
-	GOTO	SCANE			;; since the button was pressed, we do not need to do any more scanning.
-	
-R0C2	BTFSS	PORTA,2			;; check if Row 0 Column 2 is high (keypad 3)
-	GOTO	R1C0			;; if button is not pressed go to the next one.
-	MOVLW	d'3'			;; Moves the value of keypad into the working register
-	MOVWF	CCODE			;; Moves the content of the working register into the file.
-	GOTO	SCANE			;; since the button was pressed, we do not need to do any more scanning.
-
-R1C0	BCF	PORTB,0			;; Turns off output for row 0 scanning
-	BSF	PORTB,1			;; Turns on output for row 1 scanning
-
-	BTFSS	PORTA,0			;; check if Row 1 Column 0 is high (keypad 4)
-	GOTO	R1C1			;; if button is not pressed go to the next one.
-	MOVLW	d'4'			;; Moves the value of keypad into the working register
-	MOVWF	CCODE			;; Moves the content of the working register into the file.
-	GOTO	SCANE			;; since the button was pressed, we do not need to do any more scanning.
-
-R1C1	BTFSS	PORTA,1			;; check if Row 1 Column 1 is high (keypad 6)
-	GOTO	R1C2			;; if button is not pressed go to the next one.
-	MOVLW	d'5'			;; Moves the value of keypad into the working register
-	MOVWF	CCODE			;; Moves the content of the working register into the file.
-	GOTO	SCANE			;; since the button was pressed, we do not need to do any more scanning.
-
-R1C2	BTFSS	PORTA,2			;; check if Row 1 Column 2 is high (keypad 6) 
-	GOTO	R1C3			;; if button is not pressed go to the next one.
-	MOVLW	d'6'			;; Moves the value of keypad into the working register
-	MOVWF	CCODE			;; Moves the content of the working register into the file.
-	GOTO	SCANE			;; since the button was pressed, we do not need to do any more scanning.
-
-R1C3	BTFSS	PORTA,3			;; check if Row 1 Column 3 is high (keypad CLR)
-	GOTO	R2C0			;; if button is not pressed go to the next one.	;; ERROR HERE! MOVED TO R2C1
-	GOTO	CODE0			;; reset to the start of the code checking sequence
-	GOTO	SCANE			;; since the button was pressed, we do not need to do any more scanning.
-
-R2C0	BCF	PORTB,1			;; Turns off output for row 1 scanning
-	BSF	PORTB,2			;; Turns on output for row 2 scanning
-
-	BTFSS	PORTA,0			;; check if Row 2 Column 0 is high (keypad 7) 
-	GOTO	R2C1			;; if button is not pressed go to the next one.
-	MOVLW	d'7'			;; Moves the value of keypad into the working register
-	MOVWF	CCODE			;; Moves the content of the working register into the file.
-	GOTO	SCANE			;; since the button was pressed, we do not need to do any more scanning.
-
-R2C1	BTFSS	PORTA,1			;; check if Row 2 Column 1 is high (keypad 8)
-	GOTO	R2C2 			;; if button is not pressed go to the next one.
-	MOVLW	d'8'			;; Moves the value of keypad into the working register
-	MOVWF	CCODE			;; Moves the content of the working register into the file.
-	GOTO	SCANE			;; since the button was pressed, we do not need to do any more scanning.
-
-R2C2	BTFSS	PORTA,2			;; check if Row 2 Column 2 is high (keypad 9)
-	GOTO	R0C0			;; if button not pressed go to the start of the code checker (This causes a loop starting at R0C0 to R2C2!)
-	MOVLW	d'9'			;; Moves the value of keypad into the working register
-	MOVWF	CCODE			;; Moves the content of the working register into the current code register
-	BCF	PORTB,2			;; Turns off output for row 2 scanning
-	
-SCANE	MOVLW	b'00000111'		;; Set working register to 111 so we can turn on all rows for final scan
-	MOVWF	PORTB			;; Set all scan rows to high so we can make sure all inputs are not pressed. (should also remove READY)
-	
-	;; since this is the end of the function we need to check that no button is pressed at this moment.
-	MOVLW	0			;; move 1 in decimal into working register
-	SUBWF	PORTA,W			;; take 1 from porta in W (for comparison method)    ;; code error, placed SUBLW	instead of SUBWF
-	BTFSS	STATUS,Z		;; check if carry bit is up (this will happen if PORTA=0 then Z will = 1)
-	GOTO	SCANE			;; loop until PORTA is empty.
-	CLRF	PORTB			;; now we are out the loop, re-clear PORTB
-	MOVF	CCODE,W		;; test
-	MOVWF	PORTB
-	RETURN	    ; end of function - this is where R0C0 entry goes back to caller!
- 
+; Pre-processor directives
     
+#define GAMEMODE_TEST			; Game modes are currently hard coded :(
+					; 1. GAMEMODE_TEST (Known Code)
+					; 2. GAMEMODE_REACTION (Unknown code,
+					;	input is pseudo-random)
+					; 3. GAMEMODE_VERSUS (2-player, 1 player
+					;	enters code, other guesses.)
+    
+#define N_DIGITS 6			; Macros can accept an arbitrary amount
+					; of digits, but all other code scan
+					; functions have run in increments of 15
+					; at most (unless the initial addr is
+					; somewhere between XXXX 0000 
+					; and XXXX 1111 exclusive.
+					; It is suggested to keep this at 6 to
+					; maintain compatibility with code that
+					; uses the DC flag to determine when to
+					; stop scanning.
+
+#define RC_ENC_1    b'00001001'	; '0 CCCC RRR' encoding
+#define RC_ENC_2    b'00001010'
+#define RC_ENC_3    b'00001100'
+#define RC_ENC_4    b'00010001'
+#define RC_ENC_5    b'00010010'
+#define RC_ENC_6    b'00010100'
+#define RC_ENC_7    b'00100001'
+#define RC_ENC_8    b'00100010'
+#define RC_ENC_9    b'00100100'
+#define RC_ENC_CLR  b'01000010'
+				
+; Indirect Addressing Bank Select (INDF,FSR)
+#define	IRP1	    BSF	STATUS,7	; Bank 2,3
+#define	IRP0	    BCF	STATUS,6	; Bank 0,1
+
+; Direct Addressing Bank Select (general operations)					
+#define BANK1	    BSF	STATUS,5
+#define BANK0	    BCF	STATUS,5	; CLRF would also modify IRP... 
+					; we will spend most of our time
+						; in bank 0.
+
+;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::					
+; Memory locations
+
+	idata	0x02A
+C1	db	RC_ENC_1		;; occupies 0x2A to 2F.
+C2	db	RC_ENC_2		;; if the location is changed, the lsb
+C3	db	RC_ENC_3		;; of the hex number must be 0xA. This
+C4	db	RC_ENC_4		;; is because the code relies on Digit
+C5	db	RC_ENC_5		;; Carry to determine when all 6 codes
+C6	db	RC_ENC_6		;; are read.
+	
+	udata	0x020
+GST	res	.1
+CPTR	res	.1
+TMP1	res	.1
+TMP	res	.1
+
+		
+	; Startup Vectors
+RES_VECT    CODE    0x0000
+	    GOTO    _INIT
+INT_VECT    CODE    0x0004
+	    GOTO    _GAME
+	    
+;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::	
+;; Macros								      ;;
+;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+; Inserts N RLF f,d instructions.
+RLFN	macro file,dest,n
+i=0
+	while i < n
+	RLF	file,dest
+i++
+	endw
+	endm
+; Obtain N inputs, and store them in addresses over range addr : addr + n
+N_PLAYER_INPUT	macro initial_addr,n		    ;; TODO: REDO AS FUNCTION
+i=0						    ;; SO THAT CAN PROCESS CLR
+	while i < n				    ;; EFFICIENTLY!! :)
+	    CALL	GET_INPUT_BLOCKING
+		
+	    MOVWF	initial_addr + i
+i++
+	endw
+	endm
+; Obtain N random numbers, and store them in addresses over range addr : addr+n	
+N_PRNG	macro initial_addr,n
+i=0
+	while i < n
+	    CALL	PSEUDO_PRNG_W
+	    MOVWF	initial_addr + i
+i++
+	endw
+	endm
+	
+; rotate left no carry increment if zero
+RLNCIFZ	macro file,max_width	
+	RLF	file,f
+	MOVF	file,w
+	BTFSS	STATUS,Z    ; Increment if empty
+	INCF	file,f
+	BTFSS	file,max_width + 1 ; prevent carry behaviour
+	CLRF	file
+	endm
+	
+MOVLF	macro file,literal
+	MOVLW	literal
+	MOVWF	file
+	endm
+;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+;; Code									      ;;
+;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+	
+	;; Startup / On-Reset subroutine
+_INIT	BANK1
+	BCF	ADCON0,0	;;  Disable A/D conversion.
+	MOVLW	B'00011111'	;;  RA<0:4> are inputs, rest out
+	MOVWF	TRISA		;;  RB is all output.
+	MOVLW	B'00000000'
+	MOVWF	TRISB
+	BANK0
+	IRP0				;; all indirect addr happens in b0.					
+	; Main loop / program
+	
+_GAME	CALL	CODECHECK_N
+	MOVF	GST,W
+	BTFSS	STATUS,Z	    ; State of GST
+	GOTO	_CCHK_LOSE
+	CALL	CCWIN	    ; GST is zero, play winner anim.
+	CALL	CODE_RST
+	GOTO	_GAME
+_CCHK_LOSE
+	CALL	CCLOSE	    ; GST is non-zero, so we lost.
+	CALL	CODE_RST
+	GOTO	_GAME
+
+;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+;; Subroutines
+;:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::	
+; CODE_RST will clear all numbers from C<1:6>. Modifies FSR and addr 2A to 2F.
+CODE_RST
+	CLRF	GST
+	MOVLW	0x2A	    ;; Addressing INDF accesses the register whose addr
+	MOVWF	FSR	    ;; is located at FSR. INDF -> &FSR
+_NRST	CLRF	INDF
+	INCF	FSR,F
+	BTFSS	STATUS,5    ;; Digit carry (0010 1111 -> 0011 0000 will trigger)
+	GOTO	_NRST
+	RETURN
+
+TEST_CODE
+	MOVLF	0x2A,RC_ENC_1
+	MOVLF	0x2B,RC_ENC_2
+	MOVLF	0x2C,RC_ENC_3
+	MOVLF	0x2D,RC_ENC_4
+	MOVLF	0x2E,RC_ENC_5
+	MOVLF	0x2F,RC_ENC_6
+	RETURN
+	
+; Get a user input from keypad. As slow imprecise RC, fast presses may not be
+; detected. Modifes WREG,FSR,PORTB. Returns the code in WREG.
+; To get many codes, use N_PLAYER_INPUT, which will also account for CLR.
+GET_INPUT_BLOCKING
+	MOVLF	TMP1,.1	    ; tmp1 is current row.
+_GET_INPUT
+	MOVF	TMP1,W	    ; Enable row
+	IORWF	PORTB,F
+	MOVF	PORTA,W	    ; Get column result -> TMP
+	ANDLW	b'1111'
+	MOVWF	TMP
+	MOVLW	b'11111000' ; Disable row without intefering with PORTB other.
+	ANDWF	PORTB,F
+	MOVF	TMP,W	    ; Check column result by masking potential junk
+	BTFSS	STATUS,Z    ; 00000XXX is non zero?
+	GOTO	_INPUT_SUCCESS ; Non zero means there was a button pressed.
+	RLF	TMP1,F
+	BTFSS	TMP1,3
+	GOTO	_GET_INPUT	; loop not exceeded (00000XXX)
+	MOVLF	TMP1,.1		; reset TMP1 to row .1
+	GOTO	_GET_INPUT
+_INPUT_SUCCESS
+	RLFN	TMP,F,2		; deal w temp
+	RLF	TMP,W
+	IORWF	TMP1,F	      ;; '0CCCCRRR' Code format. Result stored in FSR
+_INPUT_LOCK			;; Prevent blocking until low again.
+	MOVF	PORTA,W		;; this is to hopefully prevent repeat
+	ANDLW	b'111'		;; inputs. not accountign for bounce.
+	BTFSS	STATUS,Z
+	GOTO	_INPUT_LOCK
+	RETURN
+
+; Returns 1 in wreg if clr is presseed at that instant. Blocks until CLR
+; is released again.
+IS_CLR
+	CLRF	PORTB
+	BSF	PORTB,1
+	BTFSS	PORTA,3
+	RETLW	.0  
+	BTFSC	PORTA,3		; INPUT TRAP
+	GOTO	$-2
+	RETLW	.1
+
+; Generate pseudorandom number via waiting for the user to press CLR. Blocks for
+; user input. Use N_PRNG to get many random numbers. Blocks until CLR release.
+PSEUDO_PRNG_W
+	CLRF	PORTB
+	BSF	PORTB,1		; clr is on row 1 instead of a dedicated pin... oops!
+	CLRF	TMP
+	CLRF	TMP1
+_RIN	RLNCIFZ	TMP,4		; The hope is that this can go fast enough
+	BTFSS	STATUS,Z	; to make a fake input...
+	GOTO __RINB		; TMP (C) was not reset (zero'd)
+	RLNCIFZ	TMP1,3		; TMP (C) was reset, so we rotate/update R/TMP1
+__RINB	BTFSS	PORTA,3
+	GOTO	_RIN
+	BTFSC	PORTA,3		; release trap
+	GOTO	$-2
+	BCF	PORTB,1
+	RETURN	
+
+; Checks a user input code against the code stored at *CPTR. The custom format
+; is positively dependent on its mapped value, so "<,>,="-esque operations can
+; be used without additional overhead.
+CODECHECKER
+	CALL	GET_INPUT_BLOCKING
+	BTFSC	TMP1,6	    ; Bit exclusively used for CLR.
+	RETLW	.1	    ; this state is not a normal CCCCRRR state (rst st.)
+	MOVF	CPTR,W	    ; FSR state has to be loaded.
+	MOVWF	FSR
+	MOVF	TMP1,W
+	SUBWF	INDF,W	    ; Twos complement representation
+	BTFSC	STATUS,Z    ; Equals case
+	RETURN
+	BTFSS	TMP,7	    ; Test the MSB (negative bit). (aka wreg>F)
+	GOTO	_CBYPLO
+	BTFSS	GST,1	    ; MUTUALLY EXCLUSIVE BITS.
+	BSF	GST,0	    ; Too high! (Set game state flags)
+_CBYPLO	BTFSS	GST,0
+	BSF	GST,1	    ; Too low!	
+	RETURN
+			    
+; Checks user input (blocking) against a range of addresses (0x2A - 2F)
+CODECHECK_N
+	MOVLW	0x2A		    ; initial state
+	MOVWF	CPTR
+_CCHK_N	CALL	CODECHECKER	    ; get result
+	SUBLW	.1		    ; if it is clr, -1 should yeild 0.
+	BTFSC	STATUS,Z
+	GOTO	CODECHECK_N	    ; start from the very stop
+	INCF	CPTR,F
+	BTFSC	STATUS,DC	    ; Still need to scan more codes
+	GOTO	_CCHK_N		    ; 0010 1111 -> 0011 0000 = DC.
+	RETURN
+
+;; CCWIN: "Open Puzzle box" (portb7 high), and play scrolling right animation.
+CCWIN	MOVLW	b'10000000'		;; Delay register init. (not precise timing)
+	MOVWF	TMP1			
+	MOVLW	b'00001000'		;; S1 initial positon
+	MOVWF	TMP
+WINL	RLF	TMP,F
+	BTFSS	TMP,7			;; Bypass reset if it hasn't reached
+	GOTO	_BYPWL			;; the end.
+	MOVLW	b'1000'			;; Recentre/reset S1.
+	MOVF	TMP,W  
+_BYPWL	IORLW	B'10000000'		; '1XXXXXXX' (bit 7 will always be act.)
+	MOVWF	PORTB			;; Applies current 'frame' of animation to PORTB
+	DECFSZ	TMP1			;; repeat animation loop until delay is
+	GOTO	WINL			;; finished.
+	CLRF	PORTB
+	RETURN
+
+; Informs the user if their guess was too high (RA<4>) or too low (RA<4>).
+; This subroutine assumes GST is non-zero, and has mutually exclusive flags.
+CCLOSE	CLRF	PORTB			;; clear output pre-emptive
+	MOVLW	b'10000000'		;; Init delay register (not precise.)
+	MOVWF	TMP1
+	RLFN	GST,F,3			;; 0000 00LH -> 00LH 0000
+	RLF	GST,W
+	MOVWF	PORTB
+_CCLOSE	DECFSZ	TMP1
+	GOTO	_CCLOSE			;; delay trap
+	CLRF	PORTB
+	RETURN
+	
 	END
+	
+    
+; Changes in V2
+;  + Indirect addressing is used much more instead of macros, optimizing the
+;    program size. The indirect addressing method should also be faster in
+;    execution, I believe, though this has not been analysed or benchmarked.
+    ;  + Gamemodes - Using pre-processor directives, the program can be hard-set
+    ;  to a certain play style. These are described later in the source.
+    ;  - a lot of code!
+    ;  ! I don't plan to test this outside of MPLAB. This was a fun exercise for
+    ;  an evening, but I don't have access to the same 16F chip nor a programmer
+    ;  as of rn.
+    ;  ! Numbers are used differently on results, in CCCCRRR format (c=column
+    ;  bits, r= row bits). 
+    ;  ! relocateable code directives
+    ;  ! buggy or dangerous code! lots of dead or unexpected RETURN statements
+    ;  that could cause a stack crash (ie subsequent runs start within func.
+    ;  CCLOSE!!)
+    
+    ; TODO LATER:
+    ;  too high/low comparison (should be easy to implement... check row and
+    ;  column bits independently (> , < , =)
+    
+    ; Ideas for a V3
+    ; GET_INPUT_BLOCKING could be made non-blocking.
+    ; Additional features, like a menu system, could be added. This could
+    ; facilitate gamemodes.
+    ; Sleep mode - the whole system could be battery powered and woken by a btn
+    ; press. As with the current deisgn, the interruptable pins are occupied by
+    ; LEDs.
+    ; A crystal oscilator can be used. this would be drop in, as RA7,RA6 are
+    ; available.
+    ; A version using a crystal instead would be much more stable timing-wise,
+    ; and we could provide timing/delay routines that will be very stable.
+    ; code can be refactored to use the full 15 increment space for larger codes
