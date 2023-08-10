@@ -144,7 +144,18 @@ _INIT	BANK1
 	IRP0				;; all indirect addr happens in b0.					
 	; Main loop / program
 	
-_GAME	CALL	CODECHECK_N
+_GAME	NOP
+	ifdef GAMEMODE_TEST	    ; GAMEMODE_TEST requires no action,
+	CALL	TEST_CODE
+	endif
+	ifdef GAMEMODE_VERSUS	    ; as C<1:6> are already initialized.
+	N_PLAYER_INPUT N_DIGITS
+	endif
+	ifdef GAMEMODE_REACTION
+	N_PRNG N_DIGITS
+	endif
+	
+	CALL	CODECHECK_N
 	MOVF	GST,W
 	BTFSS	STATUS,Z	    ; State of GST
 	GOTO	_CCHK_LOSE
